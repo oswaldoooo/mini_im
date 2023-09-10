@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -95,107 +94,6 @@ func main() {
 }
 
 // socket
-func readcon(con net.Conn) {
-	var (
-		lang   int
-		err    error
-		msgarr []message
-	)
-	defer con.Close()
-	buffer := make([]byte, 1500)
-	id := rand.Uint32() % (1 << 24)
-	_, ok := clientlist[id]
-	start := time.Now()
-	fmt.Println("generate rand id", id)
-	for ok && time.Since(start) < TIMEOUTMAX {
-		id = rand.Uint32()
-		_, ok = clientlist[id]
-	}
-	if ok {
-		errorlog.Println("generate id timeout")
-		return
-	}
-	clientlist[id] = &client{}
-	var cli *client = clientlist[id]
-	buffer[0] = byte((id / (256 * 256)) % 256)
-	buffer[1] = byte((id / 256) % 256)
-	buffer[2] = byte(id % 256)
-	fmt.Println("send to clientid to client")
-	_, err = con.Write(buffer[:3])
-	if err == nil {
-		lang, err = con.Read(buffer)
-		if err == nil {
-			if lang == 5 {
-				//parse client id and room
-				var tid uint32 = uint32(buffer[0])*256*256 + uint32(buffer[1])*256 + uint32(buffer[2])
-				if tid == id {
-					_, err = con.Write([]byte{2})
-					if err != nil {
-						errorlog.Println("connection closed")
-						return
-					}
-					var roomid uint32 = uint32(buffer[3])*256 + uint32(buffer[4])
-					fmt.Printf("[debug]roomid origin %v %v\n", buffer[3], buffer[4])
-					if _, ok := roomlist[roomid]; !ok {
-						roomlist[roomid] = &room{}
-						debuglog.Println("create new room", roomid)
-					}
-					cli.roomid = roomid
-					debuglog.Printf("client %v add to room %v", id, roomid)
-					isclose := false
-					go func() {
-						for !isclose {
-							lang, err = con.Read(buffer)
-							if err == nil {
-								if !writetomessage(buffer[1:lang], cli.roomid, id) {
-									_, err = con.Write(writeto(MSG_CTR, "send message failed,unknown error"))
-									if err != nil {
-										isclose = true
-										break
-									}
-								}
-							} else {
-								errorlog.Println("connection closed by client", err.Error())
-								isclose = true
-							}
-						}
-
-					}()
-					for !isclose {
-						cli.mutex.RLock()
-						if roomlist[cli.roomid].latestversion != cli.last_verion {
-							//have new message
-							cli.mutex.RUnlock()
-							cli.mutex.Lock()
-							debuglog.Printf("cli %v roomid %v start get msg", id, cli.roomid)
-							msgarr = getmessage(cli.last_verion, roomid)
-							debuglog.Printf("cli %v get message %d and prepare send to client", id, len(msgarr))
-							err = sendtocli(&msgarr, con)
-							debuglog.Printf("cli %v send message successful", id)
-							cli.last_verion = roomlist[cli.roomid].latestversion
-							cli.mutex.Unlock()
-						} else {
-							cli.mutex.RUnlock()
-						}
-						if err != nil {
-							errorlog.Println("connection closed", err.Error())
-							isclose = true
-						}
-					}
-				} else {
-					con.Write([]byte{1})
-					errorlog.Println("client get wrong clientid,wrong:", tid, "correct:", id)
-				}
-			} else {
-				errorlog.Println("data is not correct", buffer[:lang])
-			}
-		} else if err != io.EOF {
-			errorlog.Println("[error]", err.Error())
-		}
-	} else {
-		errorlog.Println("[error]", err.Error())
-	}
-}
 func readconse(con net.Conn) {
 	defer con.Close()
 
@@ -311,6 +209,8 @@ func readconse(con net.Conn) {
 		}
 	}
 }
+
+// get the latest message that client not read
 func getmessage(version, roomid uint32) []message {
 	var msgarr = []message{}
 	var msg *message
@@ -336,6 +236,8 @@ func getmessage(version, roomid uint32) []message {
 	}
 	return msgarr
 }
+
+// send unread messages to client
 func sendtocli(src *[]message, con net.Conn) error {
 	if len(*src) == 0 {
 		return nil
@@ -423,23 +325,8 @@ func writetomessage(message []byte, roomid, sendid uint32) bool {
 	}
 	return false
 }
-func writeto(code uint8, msg ...string) []byte {
-	var ans []byte
-	if len(msg) == 0 {
-		return []byte{code}
-	}
-	if len(msg[0]) >= 1023 {
-		ans = make([]byte, 1+len(DATA_OUT_OF_RANGE))
-		ans[0] = code
-		copy(ans[1:], []byte(DATA_OUT_OF_RANGE))
-	} else {
-		ans = make([]byte, len(msg[0])+1)
-		ans[0] = code
-		copy(ans[1:], []byte(msg[0]))
-	}
 
-	return ans
-}
+// interact with database
 func writeTodatabase(mod uint8, query string, args ...any) (any, error) {
 	defer fmt.Printf("write to database finished,mod %d\n", mod)
 	fmt.Println("start exec sql...")

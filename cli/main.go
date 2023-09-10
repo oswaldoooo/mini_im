@@ -139,6 +139,5 @@ func msg_syn(src []byte, con net.Conn) {
 	fmt.Fprintf(output, "[have %v message to accept]", needacceptmsg)
 }
 func msg_ack(src []byte, con net.Conn) {
-	// debuglog.Println("[from server]", string(src[6:]))
 	fmt.Fprintln(output, "[from server]", string(src[6:]))
 }
