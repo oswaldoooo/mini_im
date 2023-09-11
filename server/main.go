@@ -336,17 +336,14 @@ func writeTodatabase(mod uint8, query string, args ...any) (any, error) {
 		if mod == QUERY {
 			dbmutex.RLock()
 			defer dbmutex.RUnlock()
-			fmt.Println("do query")
 			return db.QueryContext(context.Background(), query, args...)
 		} else if mod == QUERYROW {
 			dbmutex.RLock()
 			defer dbmutex.RUnlock()
-			fmt.Println("do query row")
 			return db.QueryRowContext(context.Background(), query, args...), nil
 		} else if mod == EXEC {
 			dbmutex.Lock()
 			defer dbmutex.Unlock()
-			fmt.Println("do exec")
 			return db.ExecContext(context.Background(), query, args...)
 		}
 	}
